@@ -170,7 +170,7 @@ Plot the blood pressure measurements for a random sample of patients over time
 app_both_bp <- app_both_bp %>%
   mutate(id = as.factor(id))
 
-sample_id <- sample(unique(app_both_bp$id), 15)
+sample_id <- sample(unique(app_both_bp$id), 10)
 
 app_both_bp %>%
   #filter(question == "sbp") %>%

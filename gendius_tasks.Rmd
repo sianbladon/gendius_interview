@@ -1,0 +1,187 @@
+---
+title: "Gendius Interview Tasks"
+author: 
+date: 
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+  
+  
+
+### 1. 
+I would use codelist A (SNOMED) to identify type 2 diabetes patients in a UK primary care centre. 
+Codelist C are ICD-10 codes which are used in UK secondary care but not primary care, so they would not be appropriate.   
+Codelists B and D are Read codes which have been commonly used across primary care, but have now been replaced by SNOMED. It might depend, however, on the practice and which electronic health record system is being used and whether historical data recorded using Read codes have been mapped to SNOMED codes.   
+
+### 2.
+
+I propose the following additions/changes to the app questions:  
+ - Q1 add a text box to specify 'other' diabetes  
+ - Q3 if answer yes, ask how frequently they test their glucose and how they do it
+ - Q3.1 ask approximately what time the test was taken and how many hours between   reading and previous meal  
+ - Q6 and Q7 if yes, specify which medication they take and approximately how long for  
+ - Q8 and 9.1-9.3 change options to yes - currently have the issue, yes - have     had issue in the past, or no/don't know  
+ - Q11 specify if want average consumption or previous days  
+ - Q4 add options to select from for ethnicity, rather than a free text box  
+ - Q1-5 asking for latest reading, ask how the readings were done i.e. by a health professional or by the user  
+ - Q1-5 ask for date reading was taken, as it might not be the same day as it is inputted to the app  
+ - Q8 if yes or used to smoke then ask approximately how many cigarettes per day or week. Could also ask approximately how many years they have smoked for  
+ - add question about how long since last consultation/review with GP about their diabetes
+ 
+### 3. 
+ 
+ Population - patients using the app, exclude patients who have been using the app for less than 6 months   
+ Intervention - changes to the questions in the app  
+ Comparison - user engagement in the period before the changes were made, compared with the period after changes  
+ Outcome - how frequently users are logging onto the app and recording a response to any of the questions  
+ Time - a minimum of 6 months before the changes and 6 months after, so a minumum of 1 year overall  
+   
+ Analysis - use Poisson regression to model the count of app uses before and after the intervention, and test to see if there is a difference in the mean rate. Could do for overall app use and/or individual questions.   
+ Additionally, calculate the most frequently answered questions and what proportion of users are answering each question.   
+ An alternative approach could be to perform a change-point analysis, to detect if there are any changes to the frequency of app engagement and whether they correlate with the changes made to the questions. 
+ 
+### 4. 
+
+```{r, message = FALSE} 
+library(tidyverse)
+library(lubridate)
+library(gtsummary)
+library(gt)
+
+setwd("~/Documents/Jobs/gendius")
+ehr <- read_csv("Task4_ehr_demographics.csv")
+app <- read_csv("Task4_app_data.csv")
+```
+
+```{r}
+str(app)
+str(ehr)
+```
+
+Check there are no duplicated patient ids in EHR data   
+   
+
+```{r}
+n_distinct(ehr$id) #891
+```
+
+
+Check values are within expected ranges and for any missing entries    
+      
+```{r, warning = FALSE}
+summary(ehr$birthyear)
+summary(ehr$height)
+summary(as.factor(ehr$dmtype))
+summary(as.factor(ehr$sex))
+```
+
+Summarise EHR data
+   
+     
+```{r} 
+ehr %>%
+  select(-id) %>%
+  mutate(birth_decade = case_when(birthyear >= 1920 & birthyear < 1930 ~ "1920's",
+                                  birthyear >= 1930 & birthyear < 1940 ~ "1930's",
+                                  birthyear >= 1940 & birthyear < 1950 ~ "1950's",
+                                  birthyear >= 1950 & birthyear < 1960 ~ "1960's",
+                                  birthyear >= 1960 & birthyear < 1970 ~ "1970's",
+                                  birthyear >= 1970 & birthyear < 1980 ~ "1980's",
+                                  birthyear >= 1980 & birthyear < 1990 ~ "1990's",
+                                  birthyear >= 1990 & birthyear < 2000 ~ "1990's",
+                                  birthyear >= 2000 & birthyear < 2010 ~ "2000's")) %>%
+  select(-birthyear) %>%
+  rename(`Diabetes Type, n (%)` = dmtype,
+         `Sex, n (%)` = sex,
+         `Height, median (IQR)` = height,
+         `Birth Decade, n (%)` = birth_decade) %>%
+  tbl_summary(digits = list(all_categorical() ~ c(0, 1)))
+```
+
+See how many distinct id's in app data
+   
+     
+```{r}
+n_distinct(app$id)   
+```
+   
+      
+See which questions are the most frequently answered  
+   
+
+```{r}
+app %>%
+  select(question) %>%
+  tbl_summary(sort = list(everything() ~ "frequency"))
+```
+
+  
+Along with weight, sbp and dbp are the most frequently recorded.
+Filter out blood pressure measurements only  
+  
+  
+```{r}
+
+app_both_bp <- app %>%
+  filter(question == "sbp" | question == "dbp") %>%
+  arrange(id, obs_date) %>%
+  mutate(value = as.numeric(value))
+
+summary(app_both_bp$obs_date)
+summary(app_both_bp$value)
+```
+  
+Check distribution of blood pressure measurements  
+  
+    
+
+```{r}
+ggplot(app_both_bp) +
+  geom_histogram(aes(x = value), binwidth = 5, colour = "grey", fill = "lightgrey") +
+  facet_wrap(~ question) +
+  theme_minimal()
+```  
+  
+There are some spb and dbp values less than zero which would need addressing. Would also need to look at other positive low values and determine a cut-off point maybe.     
+   
+   
+Calculate the number of measurements per patient   
+
+```{r}
+app_both_bp %>%
+  group_by(id, question) %>%
+  count() %>%
+  ungroup() %>%
+  ggplot() +
+  geom_histogram(aes(n), binwidth = 1, colour = "grey", fill = "lightblue") +
+  labs(x = "Number of Measurements Recorded per Patient", y = "Number of Patients") +
+  theme_minimal() +
+  facet_wrap(~ question, labeller = labeller(question = c(dbp = "Diastolic Blood Pressure",
+                                                          sbp = "Systolic Blood Pressure")))
+```
+  
+Plot the blood pressure measurements for a random sample of patients over time  
+  
+```{r}
+
+app_both_bp <- app_both_bp %>%
+  mutate(id = as.factor(id))
+
+sample_id <- sample(unique(app_both_bp$id), 15)
+
+app_both_bp %>%
+  #filter(question == "sbp") %>%
+  filter(id %in% sample_id) %>%
+  mutate(value = as.numeric(value)) %>%
+  ggplot() +
+  geom_point(aes(x = obs_date, y = value, group = id, colour = id), alpha = 0.5) +
+  geom_line(aes(x = obs_date, y = value, group = id, colour = id), alpha = 0.5) +
+  labs(x = "Observation Date", y = "Blood Pressure (mmHg)", subtitle = "Each coloured line represents the blood pressure measurements for a single patient") +
+  facet_wrap(~ question, labeller = labeller(question = c(dbp = "Diastolic Blood Pressure",
+                                                          sbp = "Systolic Blood Pressure"))) +
+  theme_minimal() + 
+  theme(legend.position = "none")
+```
